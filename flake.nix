@@ -1,5 +1,5 @@
 {
-  description = "terraform-provider-nixos";
+  description = "terraform-provider-nix";
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixpkgs-unstable";
@@ -8,14 +8,14 @@
 
   outputs = { self, nixpkgs, utils }: {
     overlays.default = final: _: {
-      terraform-provider-nixos = final.buildGoModule {
-        pname = "terraform-provider-nixos";
+      terraform-provider-nix = final.buildGoModule {
+        pname = "terraform-provider-nix";
         version = builtins.readFile version/version.txt;
-        src = builtins.path { path = ./.; name = "terraform-provider-nixos-src"; };
+        src = builtins.path { path = ./.; name = "terraform-provider-nix-src"; };
         vendorSha256 = null;
         nativeBuildInputs = [ final.terraform ];
         preCheck = ''
-          go generate ./internal/nixos
+          go generate ./internal/nix
         '';
       };
     };
@@ -38,7 +38,7 @@
         self.overlays.default
       ]; inherit system;
     }; {
-    packages.default = terraform-provider-nixos;
+    packages.default = terraform-provider-nix;
 
     devShells.default = mkShell {
       packages = [ go gopls gow terraform terraform-ls ];

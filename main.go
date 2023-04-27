@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 
-	"mtoohey.com/terraform-provider-nixos/internal/nixos"
+	"mtoohey.com/terraform-provider-nix/internal/nix"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
 func main() {
-	providerserver.Serve(context.Background(), nixos.New, providerserver.ServeOpts{
-		Address: "mtoohey.com/nix/nixos",
+	providerserver.Serve(context.Background(), nix.New, providerserver.ServeOpts{
+		Address: "terraform.mtoohey.com/nix/nix",
 	})
 }

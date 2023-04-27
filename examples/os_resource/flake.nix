@@ -1,10 +1,10 @@
 {
-  description = "terraform-provider-nixos-complete-example";
+  description = "terraform-provider-nix-os-example";
 
   inputs.nixpkgs.url = "nixpkgs/nixpkgs-unstable";
 
   outputs = { self, nixpkgs }: {
-    nixosConfigurations.complete = nixpkgs.lib.nixosSystem {
+    nixosConfigurations.hello = nixpkgs.lib.nixosSystem {
       modules = [{
         boot.loader.systemd-boot.enable = true;
         fileSystems."/" = {

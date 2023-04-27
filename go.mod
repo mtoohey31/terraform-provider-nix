@@ -1,4 +1,4 @@
-module mtoohey.com/terraform-provider-nixos
+module mtoohey.com/terraform-provider-nix
 
 go 1.19
 

@@ -3,4 +3,4 @@ coverage.html
 coverage.out
 
 /result
-/terraform-provider-nixos
+/terraform-provider-nix
