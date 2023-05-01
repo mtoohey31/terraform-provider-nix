@@ -14,6 +14,13 @@
         src = builtins.path { path = ./.; name = "terraform-provider-nix-src"; };
         vendorSha256 = null;
         nativeBuildInputs = [ final.terraform ];
+        postBuild = ''
+          go generate
+        '';
+        postInstall = ''
+          mkdir -p $out/share/doc
+          cp -r docs $out/share/doc/terraform-provider-nix
+        '';
         preCheck = ''
           go generate ./internal/nix
         '';

@@ -27,7 +27,9 @@ func (nixProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp 
 
 // Schema defines the provider-level schema for configuration data.
 func (nixProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
-	resp.Schema = schema.Schema{}
+	resp.Schema = schema.Schema{
+		Description: "Interact with various Nix ecosystem constructs.",
+	}
 }
 
 // Configure prepares connections for data sources and resources.

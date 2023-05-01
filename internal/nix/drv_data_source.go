@@ -22,11 +22,11 @@ func (drvDataSource) Metadata(_ context.Context, req datasource.MetadataRequest,
 // Schema defines the schema for the data source.
 func (drvDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Evaluate a derivation.",
 		Attributes: map[string]schema.Attribute{
 			"flake_ref": schema.StringAttribute{
-				Required:            true,
-				Description:         "The flake reference to build.",
-				MarkdownDescription: "The [flake reference](https://github.com/NixOS/nix/blob/master/src/nix/flake.md#flake-references) to build.",
+				Required:    true,
+				Description: "The flake reference to build.",
 			},
 			"out_path": schema.StringAttribute{
 				Computed:    true,

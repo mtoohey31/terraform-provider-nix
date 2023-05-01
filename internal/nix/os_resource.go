@@ -45,6 +45,7 @@ func (osResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *reso
 	// TODO: support remote builds
 
 	resp.Schema = schema.Schema{
+		Description: "Manage a NixOS installation.",
 		Attributes: map[string]schema.Attribute{
 			"last_updated": schema.StringAttribute{
 				Computed:    true,
