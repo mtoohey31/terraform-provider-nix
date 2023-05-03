@@ -230,11 +230,11 @@ func (osResource) ValidateConfig(ctx context.Context, req resource.ValidateConfi
 		return
 	}
 
-	if !govalidator.IsHost(config.Host.ValueString()) {
+	if !config.Host.IsUnknown() && !govalidator.IsHost(config.Host.ValueString()) {
 		resp.Diagnostics.AddError("Invalid Host", "Host is not a valid IP address or hostname")
 	}
 
-	if !config.Port.IsNull() {
+	if !config.Port.IsUnknown() && !config.Port.IsNull() {
 		port := config.Port.ValueInt64()
 		if port <= 0 {
 			resp.Diagnostics.AddError("Port Too Small", "Port was <= 0, expected positive, unsigned, 16-bit integer")
@@ -243,8 +243,12 @@ func (osResource) ValidateConfig(ctx context.Context, req resource.ValidateConfi
 		}
 	}
 
-	parsePublicKey(config.PublicKey.ValueString(), &resp.Diagnostics)
-	parsePrivateKey(config.PrivateKeyPath.ValueString(), &resp.Diagnostics)
+	if !config.PublicKey.IsUnknown() {
+		parsePublicKey(config.PublicKey.ValueString(), &resp.Diagnostics)
+	}
+	if !config.PrivateKeyPath.IsUnknown() {
+		parsePrivateKey(config.PrivateKeyPath.ValueString(), &resp.Diagnostics)
+	}
 }
 
 // statCurrentProfileSymlink runs stat -c %Y /run/current-system on the remote
