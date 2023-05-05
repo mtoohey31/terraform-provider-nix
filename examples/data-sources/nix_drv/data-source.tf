@@ -7,8 +7,6 @@ terraform {
   }
 }
 
-provider "nix" {}
-
 data "nix_drv" "hello" {
   flake_ref = ".#hello"
 }

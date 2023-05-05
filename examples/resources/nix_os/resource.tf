@@ -7,8 +7,6 @@ terraform {
   }
 }
 
-provider "nix" {}
-
 data "nix_drv" "hello_system_profile" {
   flake_ref = ".#nixosConfigurations.hello.config.system.build.toplevel"
 }
