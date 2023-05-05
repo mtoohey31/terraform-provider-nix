@@ -25,10 +25,44 @@
           go generate ./internal/nix
         '';
       };
+
+      terraform-provider-nix-config-file = final.writeText
+        "terraform-provider-nix-config-file"
+        /* hcl */ ''
+        provider_installation {
+          filesystem_mirror {
+            path    = "${final.terraform-provider-nix-filesystem-mirror}"
+            include = ["terraform.mtoohey.com/nix/nix"]
+          }
+
+          direct {
+            exclude = ["terraform.mtoohey.com/nix/nix"]
+          }
+        }
+      '';
+
+      terraform-provider-nix-filesystem-mirror =
+        let
+          inherit (final) go terraform-provider-nix;
+          inherit (terraform-provider-nix) version;
+          inherit (go) GOOS GOARCH;
+        in
+        final.runCommand
+          "terraform-provider-nix-filesystem-mirror"
+          { } ''
+          dest_dir=$out/terraform.mtoohey.com/nix/nix/${version}/${GOOS}_${GOARCH}
+          mkdir -p $dest_dir
+          ln -s ${terraform-provider-nix}/bin/terraform-provider-nix \
+            $dest_dir/terraform-provider-nix_v${version}
+        '';
     };
   } // utils.lib.eachDefaultSystem (system: with import nixpkgs
     { overlays = [ self.overlays.default ]; inherit system; }; {
-    packages.default = terraform-provider-nix;
+    packages = {
+      default = terraform-provider-nix;
+      inherit terraform-provider-nix terraform-provider-nix-config-file
+        terraform-provider-nix-filesystem-mirror;
+    };
 
     devShells.default = mkShell {
       packages = [ go gopls terraform terraform-ls watchexec ];
