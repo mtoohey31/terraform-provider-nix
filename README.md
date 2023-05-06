@@ -4,7 +4,7 @@ A [Terraform provider](https://developer.hashicorp.com/terraform/cdktf/concepts/
 
 ## Installation
 
-> This provider is not published in any provider registory, so just adding `terraform.mtoohey.com/nix/nix` to your `required_providers` block and running `terraform init` won't work. Follow one of the sections below so `terraform init` will be able to find the provider.
+> This provider is not published in any provider registry, so just adding `terraform.mtoohey.com/nix/nix` to your `required_providers` block and running `terraform init` won't work. Follow one of the sections below so `terraform init` will be able to find the provider.
 
 ---
 
