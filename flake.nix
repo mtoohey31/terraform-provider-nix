@@ -65,7 +65,7 @@
     };
 
     devShells.default = mkShell {
-      packages = [ go gopls terraform terraform-ls watchexec ];
+      packages = [ go gopls terraform terraform-ls ];
     };
   });
 }
