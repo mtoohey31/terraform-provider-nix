@@ -1,6 +1,6 @@
-*.test
-coverage.html
-coverage.out
-
 /result
+/.direnv
+
+*.test
+*.out
 /terraform-provider-nix
