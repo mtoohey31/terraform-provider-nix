@@ -17,7 +17,7 @@ terraform {
   required_providers {
     nix = {
       source  = "terraform.mtoohey.com/nix/nix"
-      version = "0.1.1"
+      version = "0.2.0"
     }
   }
 }
@@ -27,12 +27,14 @@ data "nix_drv" "hello_system_profile" {
 }
 
 resource "nix_os" "hello" {
-  profile_path     = data.nix_drv.hello_system_profile.out_path
-  user             = "hello" # user must have permission to change the system profile
-  host             = "hello.example.com"
-  port             = 2222
-  public_key       = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
-  private_key_path = pathexpand("~/.ssh/id_ed25519")
+  profile_path = data.nix_drv.hello_system_profile.out_path
+  ssh_conn = {
+    user             = "hello" # user must have permission to change the system profile
+    host             = "hello.example.com"
+    port             = 2222
+    public_key       = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+    private_key_path = pathexpand("~/.ssh/id_ed25519")
+  }
 }
 ```
 
@@ -41,18 +43,25 @@ resource "nix_os" "hello" {
 
 ### Required
 
-- `host` (String) Hostname or IP address to connect to with SSH.
-- `private_key_path` (String) SSH private key path to authenticate with.
 - `profile_path` (String) Store path of the system profile.
-- `public_key` (String) The public key that the server will present, in the format used in `authorized_keys` files. Can be obtained using `ssh-keyscan`.
-- `user` (String) SSH username to log in with. This user must have permission to change the system profile.
-
-### Optional
-
-- `port` (Number) Port to connect to with SSH. Defaults to `22`.
+- `ssh_conn` (Attributes) SSH connection options. (see [below for nested schema](#nestedatt--ssh_conn))
 
 ### Read-Only
 
-- `last_updated` (String) Time at which the system profile as last updated.
+- `last_updated` (String) Time at which the system profile was last updated.
+
+<a id="nestedatt--ssh_conn"></a>
+### Nested Schema for `ssh_conn`
+
+Required:
+
+- `host` (String) Hostname or IP address to connect to with SSH.
+- `private_key_path` (String) SSH private key path to authenticate with.
+- `public_key` (String) The public key that the server will present, in the format used in `authorized_keys` files. Can be obtained using `ssh-keyscan`.
+- `user` (String) SSH username to log in with. This user must have permission to change the system profile.
+
+Optional:
+
+- `port` (Number) Port to connect to with SSH. Defaults to `22`.
 
 

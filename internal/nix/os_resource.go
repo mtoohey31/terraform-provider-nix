@@ -3,19 +3,14 @@
 package nix
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
-	"math"
-	"net"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/asaskevich/govalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -23,9 +18,9 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// currentProfileSymlinkPath is the location of the symlink pointing to the
-// current system profile on nixos systems.
-const currentProfileSymlinkPath = "/run/current-system"
+// currentSystemProfileSymlinkPath is the location of the symlink pointing to
+// the current system profile on nixos systems.
+const currentSystemProfileSymlinkPath = "/run/current-system"
 
 // Ensure the implementation satisfies the expected interfaces.
 var _ resource.ResourceWithValidateConfig = osResource{}
@@ -49,7 +44,7 @@ func (osResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *reso
 		Attributes: map[string]schema.Attribute{
 			"last_updated": schema.StringAttribute{
 				Computed:    true,
-				Description: "Time at which the system profile as last updated.",
+				Description: "Time at which the system profile was last updated.",
 			},
 
 			"profile_path": schema.StringAttribute{
@@ -57,27 +52,10 @@ func (osResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *reso
 				Description: "Store path of the system profile.",
 			},
 
-			"user": schema.StringAttribute{
+			"ssh_conn": schema.SingleNestedAttribute{
+				Attributes:  sshConnObjectAttrs,
 				Required:    true,
-				Description: "SSH username to log in with. This user must have permission to change the system profile.",
-			},
-			"host": schema.StringAttribute{
-				Required:    true,
-				Description: "Hostname or IP address to connect to with SSH.",
-			},
-			"port": schema.Int64Attribute{
-				Optional:            true,
-				Description:         "Port to connect to with SSH. Defaults to 22.",
-				MarkdownDescription: "Port to connect to with SSH. Defaults to `22`.",
-			},
-			"public_key": schema.StringAttribute{
-				Required:            true,
-				Description:         "The public key that the server will present, in the format used in authorized_keys files. Can be obtained using ssh-keyscan.",
-				MarkdownDescription: "The public key that the server will present, in the format used in `authorized_keys` files. Can be obtained using `ssh-keyscan`.",
-			},
-			"private_key_path": schema.StringAttribute{
-				Required:    true,
-				Description: "SSH private key path to authenticate with.",
+				Description: "SSH connection options.",
 			},
 		},
 	}
@@ -89,89 +67,7 @@ type osResourceModel struct {
 
 	ProfilePath types.String `tfsdk:"profile_path"`
 
-	User           types.String `tfsdk:"user"`
-	Host           types.String `tfsdk:"host"`
-	Port           types.Int64  `tfsdk:"port"`
-	PublicKey      types.String `tfsdk:"public_key"`
-	PrivateKeyPath types.String `tfsdk:"private_key_path"`
-}
-
-// parsePublicKey parses publicKey, which should be in authorized_hosts format.
-// If errors are encountered, they will be added to diagnostics and nil will
-// be returned.
-func parsePublicKey(publicKey string, diagnostics *diag.Diagnostics) ssh.PublicKey {
-	pub, _, _, rest, err := ssh.ParseAuthorizedKey([]byte(publicKey))
-	if reportErrorWithTitle(err, "Could Not Parse SSH Public Key", diagnostics) {
-		return nil
-	}
-	if len(rest) > 0 {
-		diagnostics.AddError(
-			"SSH Public Key Contained More Than One Entry",
-			"SSH public key should only contain a single entry, but it contained more than one",
-		)
-		return nil
-	}
-	return pub
-}
-
-// parsePrivateKey parses the file at privateKeyPath, which should be in PEM
-// format. If errors are encountered, they will be added to diagnostics and nil
-// will be returned.
-func parsePrivateKey(privateKeyPath string, diagnostics *diag.Diagnostics) ssh.Signer {
-	buf, err := os.ReadFile(privateKeyPath)
-	if reportErrorWithTitle(err, "Could Not Read SSH Private Key", diagnostics) {
-		return nil
-	}
-
-	priv, err := ssh.ParsePrivateKey(buf)
-	if reportErrorWithTitle(err, "Could Not Parse SSH Private Key", diagnostics) {
-		return nil
-	}
-	return priv
-}
-
-// sshClient returns an ssh client based on the ssh connection options in this
-// model. If an error is encountered, it will be added to diagnostics and nil
-// will be returned.
-func (m osResourceModel) sshClient(diagnostics *diag.Diagnostics) *ssh.Client {
-	pub := parsePublicKey(m.PublicKey.ValueString(), diagnostics)
-	if pub == nil {
-		return nil
-	}
-
-	priv := parsePrivateKey(m.PrivateKeyPath.ValueString(), diagnostics)
-	if priv == nil {
-		return nil
-	}
-
-	sshConfig := &ssh.ClientConfig{
-		User: m.User.ValueString(),
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(priv)},
-		HostKeyCallback: ssh.HostKeyCallback(func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			expected := pub.Marshal()
-			actual := key.Marshal()
-			if !bytes.Equal(expected, actual) {
-				return fmt.Errorf("host key mismatch, expected: %s, got: %s",
-					base64.StdEncoding.EncodeToString(expected),
-					base64.StdEncoding.EncodeToString(actual),
-				)
-			}
-
-			return nil
-		}),
-	}
-
-	port := int64(22)
-	if !m.Port.IsNull() {
-		port = m.Port.ValueInt64()
-	}
-
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", m.Host.ValueString(), port), sshConfig)
-	if reportErrorWithTitle(err, "Could Not Establish SSH Connection", diagnostics) {
-		return nil
-	}
-
-	return client
+	SSHConn sshConnModel `tfsdk:"ssh_conn"`
 }
 
 // copyAndActivate copies the ProfilePath of m to the remote host and activates
@@ -185,9 +81,12 @@ func (m osResourceModel) copyAndActivate(client *ssh.Client, diagnostics *diag.D
 	// the ssh stuff as pure and deterministic as possible
 
 	// Copy system profile closure
-	remoteURI := fmt.Sprintf("ssh://%s@%s", m.User.ValueString(), m.Host.ValueString())
-	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command", "copy", "--to", remoteURI, m.ProfilePath.ValueString())
-	envEntry := fmt.Sprintf("NIX_SSHOPTS=-p %d -i %s", m.Port.ValueInt64(), m.PrivateKeyPath.ValueString())
+	remoteURI := fmt.Sprintf("ssh://%s@%s", m.SSHConn.User.ValueString(),
+		m.SSHConn.Host.ValueString())
+	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command",
+		"copy", "--to", remoteURI, m.ProfilePath.ValueString())
+	envEntry := fmt.Sprintf("NIX_SSHOPTS=-p %d -i %s",
+		m.SSHConn.Port.ValueInt64(), m.SSHConn.PrivateKeyPath.ValueString())
 	cmd.Env = append(os.Environ(), envEntry)
 	combinedOutput, err := cmd.CombinedOutput()
 	if err != nil {
@@ -230,36 +129,18 @@ func (osResource) ValidateConfig(ctx context.Context, req resource.ValidateConfi
 		return
 	}
 
-	if !config.Host.IsUnknown() && !govalidator.IsHost(config.Host.ValueString()) {
-		resp.Diagnostics.AddError("Invalid Host", "Host is not a valid IP address or hostname")
-	}
-
-	if !config.Port.IsUnknown() && !config.Port.IsNull() {
-		port := config.Port.ValueInt64()
-		if port <= 0 {
-			resp.Diagnostics.AddError("Port Too Small", "Port was <= 0, expected positive, unsigned, 16-bit integer")
-		} else if port > math.MaxUint16 {
-			resp.Diagnostics.AddError("Port Too Large", "Port was > 65535, expected positive, unsigned, 16-bit integer")
-		}
-	}
-
-	if !config.PublicKey.IsUnknown() {
-		parsePublicKey(config.PublicKey.ValueString(), &resp.Diagnostics)
-	}
-	if !config.PrivateKeyPath.IsUnknown() {
-		parsePrivateKey(config.PrivateKeyPath.ValueString(), &resp.Diagnostics)
-	}
+	validateSSHConn(config.SSHConn, &resp.Diagnostics)
 }
 
-// statCurrentProfileSymlink runs stat -c %Y /run/current-system on the remote
-// host and returns the mtime output and true if successful. If errors are
-// encountered, they will be added to diagnostics and false is returned.
-func statCurrentProfileSymlink(client *ssh.Client, diagnostics *diag.Diagnostics) (mtime time.Time, ok bool) {
+// statCurrentSystemProfileSymlink runs stat -c %Y /run/current-system on the
+// remote host and returns the mtime output and true if successful. If errors
+// are encountered, they will be added to diagnostics and false is returned.
+func statCurrentSystemProfileSymlink(client *ssh.Client, diagnostics *diag.Diagnostics) (mtime time.Time, ok bool) {
 	session := createSession(client, diagnostics)
 	if session == nil {
 		return time.Time{}, false
 	}
-	statOutput, err := output(session, "stat -c %Y "+currentProfileSymlinkPath)
+	statOutput, err := output(session, "stat -c %Y "+currentSystemProfileSymlinkPath)
 	if reportErrorWithTitle(err, "Failed to Stat System Profile Path", diagnostics) {
 		return time.Time{}, false
 	}
@@ -288,7 +169,7 @@ func (osResource) Create(ctx context.Context, req resource.CreateRequest, resp *
 	}
 
 	// Establish ssh connection
-	client := plan.sshClient(&resp.Diagnostics)
+	client := plan.SSHConn.sshClient(&resp.Diagnostics)
 	if client == nil {
 		return
 	}
@@ -300,7 +181,7 @@ func (osResource) Create(ctx context.Context, req resource.CreateRequest, resp *
 	}
 
 	// Read last updated
-	mtime, ok := statCurrentProfileSymlink(client, &resp.Diagnostics)
+	mtime, ok := statCurrentSystemProfileSymlink(client, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -320,7 +201,7 @@ func (osResource) Read(ctx context.Context, req resource.ReadRequest, resp *reso
 	}
 
 	// Establish ssh connection
-	client := state.sshClient(&resp.Diagnostics)
+	client := state.SSHConn.sshClient(&resp.Diagnostics)
 	if client == nil {
 		return
 	}
@@ -331,14 +212,14 @@ func (osResource) Read(ctx context.Context, req resource.ReadRequest, resp *reso
 	if session == nil {
 		return
 	}
-	realpathOutput, err := output(session, "realpath "+currentProfileSymlinkPath)
+	realpathOutput, err := output(session, "realpath "+currentSystemProfileSymlinkPath)
 	if reportErrorWithTitle(err, "Failed to Read System Profile Path", &resp.Diagnostics) {
 		return
 	}
 	state.ProfilePath = types.StringValue(strings.TrimSuffix(string(realpathOutput), "\n"))
 
 	// Read last updated
-	mtime, ok := statCurrentProfileSymlink(client, &resp.Diagnostics)
+	mtime, ok := statCurrentSystemProfileSymlink(client, &resp.Diagnostics)
 	if !ok {
 		return
 	}
