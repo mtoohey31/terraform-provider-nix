@@ -7,12 +7,14 @@ import (
 	"math"
 	"net"
 	"os"
+	"os/exec"
 
 	"github.com/asaskevich/govalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // sshConnObjectAttrs defines the attributes for ssh connections.
@@ -150,4 +152,78 @@ func parsePrivateKey(privateKeyPath string, diagnostics *diag.Diagnostics) ssh.S
 		return nil
 	}
 	return priv
+}
+
+// copyStorePath copies the specified path into the store of the host specified
+// by this sshConnModel using `nix copy`.
+func (s sshConnModel) copyStorePath(path string, diagnostics *diag.Diagnostics) bool {
+	// TODO: it looks like the ssh used by `nix copy` is just based on path, so
+	// we can potentially intercept the ssh connection stuff on the other side
+	// of this and use this executable as the ssh binary (by creating temporary
+	// symlinks and path entries, then checking os.Argv[0] on startup) to make
+	// the ssh stuff as pure and deterministic as possible
+
+	remoteURI := fmt.Sprintf("ssh://%s@%s", s.User.ValueString(), s.Host.ValueString())
+	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command", "copy", "--to", remoteURI, path)
+	envEntry := "NIX_SSHOPTS=-o BatchMode=yes" // Disable interactive prompts.
+
+	// Set remote port
+	port := int64(22)
+	if !s.Port.IsNull() {
+		port = s.Port.ValueInt64()
+	}
+
+	envEntry += fmt.Sprintf(" -p %d", port)
+
+	// Make sure we only allow the expected public key
+
+	pub := parsePublicKey(s.PublicKey.ValueString(), diagnostics)
+	if pub == nil {
+		return false
+	}
+
+	line := knownhosts.Line([]string{fmt.Sprintf("%s:%d", s.Host.ValueString(), port)}, pub)
+
+	tempKnownHosts, err := os.CreateTemp("", "known_hosts-")
+	if err != nil {
+		diagnostics.AddError(
+			"Failed to Create Temporary Known Hosts File",
+			err.Error(),
+		)
+		return false
+	}
+	defer func() {
+		if err := os.Remove(tempKnownHosts.Name()); err != nil {
+			diagnostics.AddWarning(
+				"Failed to Remove Temporary Known Hosts File",
+				err.Error(),
+			)
+		}
+	}()
+	if _, err := fmt.Fprint(tempKnownHosts, line); err != nil {
+		_ = tempKnownHosts.Close()
+		diagnostics.AddError(
+			"Write Failed",
+			err.Error(),
+		)
+		return false
+	}
+	_ = tempKnownHosts.Close()
+
+	envEntry += fmt.Sprintf(" -o UserKnownHostsFile=%s", tempKnownHosts.Name())
+
+	// Set private key
+	envEntry += fmt.Sprintf(" -i %s", s.PrivateKeyPath.ValueString())
+
+	// Execute command
+	cmd.Env = append(os.Environ(), envEntry)
+	if combinedOutput, err := cmd.CombinedOutput(); err != nil {
+		diagnostics.AddError(
+			"Copy Failed",
+			fmt.Sprintf("%s, output:\n%s", err, combinedOutput),
+		)
+		return false
+	}
+
+	return true
 }

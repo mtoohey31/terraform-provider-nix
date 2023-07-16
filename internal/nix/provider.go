@@ -43,5 +43,8 @@ func (nixProvider) DataSources(_ context.Context) []func() datasource.DataSource
 
 // Resources defines the resources implemented in the provider.
 func (nixProvider) Resources(_ context.Context) []func() resource.Resource {
-	return []func() resource.Resource{func() resource.Resource { return osResource{} }}
+	return []func() resource.Resource{
+		func() resource.Resource { return osResource{} },
+		func() resource.Resource { return hmEnvResource{} },
+	}
 }

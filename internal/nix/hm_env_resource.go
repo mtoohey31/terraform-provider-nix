@@ -15,38 +15,39 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// currentSystemProfileSymlinkPath is the location of the symlink pointing to
-// the current system profile on nixos systems.
-const currentSystemProfileSymlinkPath = "/run/current-system"
+// currentUserProfileSymlinkPaths is the location of the symlink pointing to
+// the current user profile for home-manager environments.
+var currentUserProfileSymlinkPaths = []string{
+	`"${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+	`"${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`,
+}
 
 // Ensure the implementation satisfies the expected interfaces.
-var _ resource.ResourceWithValidateConfig = osResource{}
+var _ resource.ResourceWithValidateConfig = hmEnvResource{}
 
-// osResource is the resource implementation.
-type osResource struct{}
+// hmEnvResource is the resource implementation.
+type hmEnvResource struct{}
 
 // Metadata returns the resource type name.
-func (osResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_os"
+func (hmEnvResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_hm_env"
 }
 
 // Schema defines the schema for the resource.
-func (osResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	// TODO: support reboot on apply
-
+func (hmEnvResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	// TODO: support remote builds
 
 	resp.Schema = schema.Schema{
-		Description: "Manage a NixOS installation.",
+		Description: "Manage a Home Manager environment.",
 		Attributes: map[string]schema.Attribute{
 			"last_updated": schema.StringAttribute{
 				Computed:    true,
-				Description: "Time at which the system profile was last updated.",
+				Description: "Time at which the user profile was last updated.",
 			},
 
 			"profile_path": schema.StringAttribute{
 				Required:    true,
-				Description: "Store path of the system profile.",
+				Description: "Store path of the user profile.",
 			},
 
 			"ssh_conn": schema.SingleNestedAttribute{
@@ -58,8 +59,8 @@ func (osResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *reso
 	}
 }
 
-// osResourceModel maps the resource schema data.
-type osResourceModel struct {
+// hmEnvResourceModel maps the resource schema data.
+type hmEnvResourceModel struct {
 	LastUpdated types.String `tfsdk:"last_updated"`
 
 	ProfilePath types.String `tfsdk:"profile_path"`
@@ -71,22 +72,13 @@ type osResourceModel struct {
 // assuming it has already been copied to that host's store. If an error is
 // encountered, it will be added to diagnostics. It returns whether any errors
 // were encountered.
-func (m osResourceModel) activate(client *ssh.Client, diagnostics *diag.Diagnostics) bool {
+func (m hmEnvResourceModel) activate(client *ssh.Client, diagnostics *diag.Diagnostics) bool {
 	session := createSession(client, diagnostics)
 	if session == nil {
 		return false
 	}
-	_, err := output(session, fmt.Sprintf("%s/bin/switch-to-configuration switch", m.ProfilePath.ValueString()))
-	if reportErrorWithTitle(err, "Failed to Switch System Profile", diagnostics) {
-		return false
-	}
-
-	session = createSession(client, diagnostics)
-	if session == nil {
-		return false
-	}
-	_, err = output(session, fmt.Sprintf("nix-env -p /nix/var/nix/profiles/system --set %s", m.ProfilePath.ValueString()))
-	if reportErrorWithTitle(err, "Failed to Set System Profile", diagnostics) {
+	_, err := output(session, fmt.Sprintf("%s/activate", m.ProfilePath.ValueString()))
+	if reportErrorWithTitle(err, "Failed to Switch User Profile", diagnostics) {
 		return false
 	}
 
@@ -94,7 +86,7 @@ func (m osResourceModel) activate(client *ssh.Client, diagnostics *diag.Diagnost
 }
 
 // ValidateConfig performs custom config validation.
-func (osResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+func (hmEnvResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	// Retrieve values from config
 	var config osResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -106,15 +98,9 @@ func (osResource) ValidateConfig(ctx context.Context, req resource.ValidateConfi
 }
 
 // Create creates the resource and sets the initial Terraform state.
-func (osResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	// TODO: maybe support infecting non-nixos hosts, if the user explicitly
-	// enables that behaviour (since this would be destructive, so we should
-	// make them set an extra option to ensure they've understood what they're
-	// doing). This should probably be done by go:embed'ding the script source,
-	// copying it over via ssh, then executing it
-
+func (hmEnvResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	// Retrieve values from plan
-	var plan osResourceModel
+	var plan hmEnvResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -127,7 +113,7 @@ func (osResource) Create(ctx context.Context, req resource.CreateRequest, resp *
 	}
 	defer client.Close()
 
-	// Copy system profile closure
+	// Copy user profile closure
 	if !plan.SSHConn.copyStorePath(plan.ProfilePath.ValueString(), &resp.Diagnostics) {
 		return
 	}
@@ -138,7 +124,7 @@ func (osResource) Create(ctx context.Context, req resource.CreateRequest, resp *
 	}
 
 	// Read last updated
-	mtime, ok := statRemoteSymlinks(client, []string{currentSystemProfileSymlinkPath}, &resp.Diagnostics)
+	mtime, ok := statRemoteSymlinks(client, currentUserProfileSymlinkPaths, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -149,9 +135,9 @@ func (osResource) Create(ctx context.Context, req resource.CreateRequest, resp *
 }
 
 // Read refreshes the Terraform state with the latest data.
-func (osResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+func (hmEnvResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	// Get current state
-	var state osResourceModel
+	var state hmEnvResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -165,18 +151,31 @@ func (osResource) Read(ctx context.Context, req resource.ReadRequest, resp *reso
 	defer client.Close()
 
 	// Read current profile path from remote host
-	session := createSession(client, &resp.Diagnostics)
-	if session == nil {
-		return
-	}
-	realpathOutput, err := output(session, "realpath "+currentSystemProfileSymlinkPath)
-	if reportErrorWithTitle(err, "Failed to Read System Profile Path", &resp.Diagnostics) {
-		return
+	var realpathOutput []byte
+	paths := currentUserProfileSymlinkPaths
+	for {
+		session := createSession(client, &resp.Diagnostics)
+		if session == nil {
+			return
+		}
+
+		var err error
+		realpathOutput, err = output(session, "realpath "+paths[0])
+
+		if err == nil {
+			break
+		} // err != nil
+
+		paths = paths[1:]
+		if len(paths) == 0 {
+			reportErrorWithTitle(err, "Failed to Read User Profile Path", &resp.Diagnostics)
+			return
+		}
 	}
 	state.ProfilePath = types.StringValue(strings.TrimSuffix(string(realpathOutput), "\n"))
 
 	// Read last updated
-	mtime, ok := statRemoteSymlinks(client, []string{currentSystemProfileSymlinkPath}, &resp.Diagnostics)
+	mtime, ok := statRemoteSymlinks(client, currentUserProfileSymlinkPaths, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -187,7 +186,7 @@ func (osResource) Read(ctx context.Context, req resource.ReadRequest, resp *reso
 }
 
 // Update updates the resource and sets the updated Terraform state on success.
-func (or osResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (or hmEnvResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// Just call Create, since Create and Update should behave identically
 	createResp := &resource.CreateResponse{
 		State:       resp.State,
@@ -207,7 +206,7 @@ func (or osResource) Update(ctx context.Context, req resource.UpdateRequest, res
 }
 
 // Delete deletes the resource and removes the Terraform state on success.
-func (osResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
+func (hmEnvResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// We don't do anything to the remote system, because there isn't really
-	// anything useful that we can do when an os resource is deleted
+	// anything useful that we can do when a home env resource is deleted
 }

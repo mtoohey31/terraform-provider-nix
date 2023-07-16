@@ -7,12 +7,12 @@ terraform {
   }
 }
 
-data "nix_drv" "hello_system_profile" {
-  flake_ref = ".#nixosConfigurations.hello.config.system.build.toplevel"
+data "nix_drv" "hello_user_profile" {
+  flake_ref = ".#homeManagerConfigurations.hello.activationPackage"
 }
 
-resource "nix_os" "hello" {
-  profile_path = data.nix_drv.hello_system_profile.out_path
+resource "nix_hm_env" "hello" {
+  profile_path = data.nix_drv.hello_user_profile.out_path
   ssh_conn = {
     user             = "hello" # user must have permission to change the system profile
     host             = "hello.example.com"

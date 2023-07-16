@@ -28,7 +28,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func TestOSResourceModel_activate(t *testing.T) {
+func TestHMEnvResourceModel_activate(t *testing.T) {
 	ts := sshtest.NewKeyAuthServer(t)
 
 	priv, err := ssh.NewSignerFromKey(ts.ClientPrivateKey)
@@ -52,46 +52,26 @@ func TestOSResourceModel_activate(t *testing.T) {
 		{
 			description: "happy path",
 			execResponses: map[string][]sshtest.Response{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch":            {{}},
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path": {{}},
+				"/nix/store/test-profile-path/activate": {{}},
 			},
 			expectedRequests: []string{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch",
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path",
+				"/nix/store/test-profile-path/activate",
 			},
 		},
 
 		{
-			description: "switch fails",
+			description: "activate fails",
 			execResponses: map[string][]sshtest.Response{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch": {{
+				"/nix/store/test-profile-path/activate": {{
 					Stdout: []byte("something went wrong\n"),
 					Status: 2,
 				}},
 			},
 			expectedRequests: []string{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch",
+				"/nix/store/test-profile-path/activate",
 			},
 			expectedDiagnostic: diag.NewErrorDiagnostic(
-				"Failed to Switch System Profile",
-				"Process exited with status 2, output:\nsomething went wrong\n",
-			),
-		},
-		{
-			description: "set fails",
-			execResponses: map[string][]sshtest.Response{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch": {{}},
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path": {{
-					Stdout: []byte("something went wrong\n"),
-					Status: 2,
-				}},
-			},
-			expectedRequests: []string{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch",
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path",
-			},
-			expectedDiagnostic: diag.NewErrorDiagnostic(
-				"Failed to Set System Profile",
+				"Failed to Switch User Profile",
 				"Process exited with status 2, output:\nsomething went wrong\n",
 			),
 		},
@@ -106,7 +86,7 @@ func TestOSResourceModel_activate(t *testing.T) {
 			}
 
 			var actualDiagnostics diag.Diagnostics
-			actualOk := osResourceModel{
+			actualOk := hmEnvResourceModel{
 				ProfilePath: types.StringValue("/nix/store/test-profile-path"),
 				SSHConn: sshConnModel{
 					User:           types.StringValue("test-user"),
@@ -127,7 +107,7 @@ func TestOSResourceModel_activate(t *testing.T) {
 	}
 }
 
-func TestOSResource_ValidateConfig(t *testing.T) {
+func TestHMEnvResource_ValidateConfig(t *testing.T) {
 	pubEd, privEd, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
@@ -159,7 +139,7 @@ func TestOSResource_ValidateConfig(t *testing.T) {
 			// Invalid Host
 			{
 				Config: providerConfig + fmt.Sprintf(`
-resource "nix_os" "test" {
+resource "nix_hm_env" "test" {
   profile_path = "/nix/store/test-profile-path"
   ssh_conn = {
     user             = "test-user"
@@ -173,7 +153,7 @@ resource "nix_os" "test" {
 			// Invalid Port, negative
 			{
 				Config: providerConfig + fmt.Sprintf(`
-resource "nix_os" "test" {
+resource "nix_hm_env" "test" {
   profile_path = "/nix/store/test-profile-path"
   ssh_conn = {
     user             = "test-user"
@@ -188,7 +168,7 @@ resource "nix_os" "test" {
 			// Invalid Port, positive, too large
 			{
 				Config: providerConfig + fmt.Sprintf(`
-resource "nix_os" "test" {
+resource "nix_hm_env" "test" {
   profile_path = "/nix/store/test-profile-path"
   ssh_conn = {
     user             = "test-user"
@@ -203,7 +183,7 @@ resource "nix_os" "test" {
 			// Invalid PublicKey, not parseable
 			{
 				Config: providerConfig + fmt.Sprintf(`
-resource "nix_os" "test" {
+resource "nix_hm_env" "test" {
   profile_path = "/nix/store/test-profile-path"
   ssh_conn = {
     user             = "test-user"
@@ -217,7 +197,7 @@ resource "nix_os" "test" {
 			// Invalid PublicKey, multiple entries
 			{
 				Config: providerConfig + fmt.Sprintf(`
-resource "nix_os" "test" {
+resource "nix_hm_env" "test" {
   profile_path = "/nix/store/test-profile-path"
   ssh_conn = {
     user             = "test-user"
@@ -231,7 +211,7 @@ resource "nix_os" "test" {
 			// Invalid PrivateKeyFile, missing
 			{
 				Config: providerConfig + fmt.Sprintf(`
-resource "nix_os" "test" {
+resource "nix_hm_env" "test" {
   profile_path = "/nix/store/test-profile-path"
   ssh_conn = {
     user             = "test-user"
@@ -245,7 +225,7 @@ resource "nix_os" "test" {
 			// Invalid PrivateKeyFile, parse fails
 			{
 				Config: providerConfig + fmt.Sprintf(`
-resource "nix_os" "test" {
+resource "nix_hm_env" "test" {
   profile_path = "/nix/store/test-profile-path"
   ssh_conn = {
     user             = "test-user"
@@ -260,7 +240,7 @@ resource "nix_os" "test" {
 	})
 }
 
-func TestOSResource_Read(t *testing.T) {
+func TestHMEnvResource_Read(t *testing.T) {
 	ts := sshtest.NewKeyAuthServer(t)
 
 	serverHost, serverPortString, ok := strings.Cut(ts.Addr.String(), ":")
@@ -281,7 +261,7 @@ func TestOSResource_Read(t *testing.T) {
 	now := time.Now()
 
 	var schemaResp resource.SchemaResponse
-	osResource{}.Schema(nil, resource.SchemaRequest{}, &schemaResp)
+	hmEnvResource{}.Schema(nil, resource.SchemaRequest{}, &schemaResp)
 	require.Empty(t, schemaResp.Diagnostics)
 
 	tests := []struct {
@@ -295,12 +275,75 @@ func TestOSResource_Read(t *testing.T) {
 		{
 			description: "happy path",
 			execResponses: map[string][]sshtest.Response{
-				"realpath /run/current-system":   {{Stdout: []byte("/nix/store/test-other-path\n")}},
-				"stat -c %Y /run/current-system": {{Stdout: []byte(strconv.FormatInt(now.Unix(), 10))}},
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`:   {{Stdout: []byte("/nix/store/test-other-path\n")}},
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{Stdout: []byte(strconv.FormatInt(now.Unix(), 10))}},
 			},
 			expectedRequests: []string{
-				"realpath /run/current-system",
-				"stat -c %Y /run/current-system",
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+			},
+			expectedResp: resource.ReadResponse{
+				State: tfsdk.State{
+					Raw: tftypes.NewValue(tftypes.Object{
+						AttributeTypes: map[string]tftypes.Type{
+							"last_updated": tftypes.String,
+							"profile_path": tftypes.String,
+							"ssh_conn": tftypes.Object{
+								AttributeTypes: map[string]tftypes.Type{
+									"user":             tftypes.String,
+									"host":             tftypes.String,
+									"port":             tftypes.Number,
+									"public_key":       tftypes.String,
+									"private_key_path": tftypes.String,
+								},
+							},
+						},
+					}, map[string]tftypes.Value{
+						"last_updated": tftypes.NewValue(tftypes.String, now.Format(time.RFC850)),
+						"profile_path": tftypes.NewValue(tftypes.String, "/nix/store/test-other-path"),
+						"ssh_conn": tftypes.NewValue(tftypes.Object{
+							AttributeTypes: map[string]tftypes.Type{
+								"user":             tftypes.String,
+								"host":             tftypes.String,
+								"port":             tftypes.Number,
+								"public_key":       tftypes.String,
+								"private_key_path": tftypes.String,
+							},
+						}, map[string]tftypes.Value{
+							"user":             tftypes.NewValue(tftypes.String, "test-user"),
+							"host":             tftypes.NewValue(tftypes.String, serverHost),
+							"port":             tftypes.NewValue(tftypes.Number, serverPort),
+							"public_key":       tftypes.NewValue(tftypes.String, ts.PublicKeyString()),
+							"private_key_path": tftypes.NewValue(tftypes.String, privateKeyPath),
+						}),
+					}),
+					Schema: schemaResp.Schema,
+				},
+			},
+		},
+		{
+			description: "happy path, global profile dir",
+			execResponses: map[string][]sshtest.Response{
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
+					Stdout: []byte("something went wrong\n"),
+					Status: 2,
+				}},
+				`realpath "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`: {{
+					Stdout: []byte("/nix/store/test-other-path\n"),
+				}},
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
+					Stdout: []byte("something went wrong\n"),
+					Status: 2,
+				}},
+				`stat -c %Y "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`: {{
+					Stdout: []byte(strconv.FormatInt(now.Unix(), 10)),
+				}},
+			},
+			expectedRequests: []string{
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+				`realpath "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`,
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+				`stat -c %Y "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`,
 			},
 			expectedResp: resource.ReadResponse{
 				State: tfsdk.State{
@@ -345,13 +388,18 @@ func TestOSResource_Read(t *testing.T) {
 		{
 			description: "realpath fails",
 			execResponses: map[string][]sshtest.Response{
-				"realpath /run/current-system": {{
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
+					Stdout: []byte("something went wrong\n"),
+					Status: 2,
+				}},
+				`realpath "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`: {{
 					Stdout: []byte("something went wrong\n"),
 					Status: 2,
 				}},
 			},
 			expectedRequests: []string{
-				"realpath /run/current-system",
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+				`realpath "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`,
 			},
 			expectedResp: resource.ReadResponse{
 				State: tfsdk.State{
@@ -360,7 +408,7 @@ func TestOSResource_Read(t *testing.T) {
 				},
 				Diagnostics: diag.Diagnostics{
 					diag.NewErrorDiagnostic(
-						"Failed to Read System Profile Path",
+						"Failed to Read User Profile Path",
 						"Process exited with status 2, output:\nsomething went wrong\n",
 					),
 				},
@@ -369,12 +417,16 @@ func TestOSResource_Read(t *testing.T) {
 		{
 			description: "stat fails",
 			execResponses: map[string][]sshtest.Response{
-				"realpath /run/current-system":   {{Stdout: []byte("/nix/store/test-other-path\n")}},
-				"stat -c %Y /run/current-system": {{Stdout: []byte("bogus")}},
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
+					Stdout: []byte("/nix/store/test-other-path\n"),
+				}},
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
+					Stdout: []byte("bogus"),
+				}},
 			},
 			expectedRequests: []string{
-				"realpath /run/current-system",
-				"stat -c %Y /run/current-system",
+				`realpath "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
 			},
 			expectedResp: resource.ReadResponse{
 				State: tfsdk.State{
@@ -402,7 +454,7 @@ func TestOSResource_Read(t *testing.T) {
 				},
 			}
 
-			osResource{}.Read(context.Background(), resource.ReadRequest{
+			hmEnvResource{}.Read(context.Background(), resource.ReadRequest{
 				State: tfsdk.State{
 					Raw: tftypes.NewValue(tftypes.Object{
 						AttributeTypes: map[string]tftypes.Type{
@@ -447,7 +499,7 @@ func TestOSResource_Read(t *testing.T) {
 	}
 }
 
-func TestOSResource_Update(t *testing.T) {
+func TestHMEnvResource_Update(t *testing.T) {
 	// This also tests Create since Update just forwards to Create
 
 	ts := sshtest.NewKeyAuthServer(t)
@@ -474,7 +526,7 @@ func TestOSResource_Update(t *testing.T) {
 	now := time.Now()
 
 	var schemaResp resource.SchemaResponse
-	osResource{}.Schema(nil, resource.SchemaRequest{}, &schemaResp)
+	hmEnvResource{}.Schema(nil, resource.SchemaRequest{}, &schemaResp)
 	require.Empty(t, schemaResp.Diagnostics)
 
 	tests := []struct {
@@ -489,16 +541,70 @@ func TestOSResource_Update(t *testing.T) {
 		{
 			description: "happy path",
 			execResponses: map[string][]sshtest.Response{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch":            {{}},
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path": {{}},
-				"stat -c %Y /run/current-system": {{
+				"/nix/store/test-profile-path/activate": {{}},
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
 					Stdout: []byte(strconv.FormatInt(now.Unix(), 10)),
 				}},
 			},
 			expectedRequests: []string{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch",
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path",
-				"stat -c %Y /run/current-system",
+				"/nix/store/test-profile-path/activate",
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+			},
+			expectedResp: resource.UpdateResponse{
+				State: tfsdk.State{
+					Raw: tftypes.NewValue(tftypes.Object{
+						AttributeTypes: map[string]tftypes.Type{
+							"last_updated": tftypes.String,
+							"profile_path": tftypes.String,
+							"ssh_conn": tftypes.Object{
+								AttributeTypes: map[string]tftypes.Type{
+									"user":             tftypes.String,
+									"host":             tftypes.String,
+									"port":             tftypes.Number,
+									"public_key":       tftypes.String,
+									"private_key_path": tftypes.String,
+								},
+							},
+						},
+					}, map[string]tftypes.Value{
+						"last_updated": tftypes.NewValue(tftypes.String, now.Format(time.RFC850)),
+						"profile_path": tftypes.NewValue(tftypes.String, "/nix/store/test-profile-path"),
+						"ssh_conn": tftypes.NewValue(tftypes.Object{
+							AttributeTypes: map[string]tftypes.Type{
+								"user":             tftypes.String,
+								"host":             tftypes.String,
+								"port":             tftypes.Number,
+								"public_key":       tftypes.String,
+								"private_key_path": tftypes.String,
+							},
+						}, map[string]tftypes.Value{
+							"user":             tftypes.NewValue(tftypes.String, "test-user"),
+							"host":             tftypes.NewValue(tftypes.String, serverHost),
+							"port":             tftypes.NewValue(tftypes.Number, serverPort),
+							"public_key":       tftypes.NewValue(tftypes.String, ts.PublicKeyString()),
+							"private_key_path": tftypes.NewValue(tftypes.String, privateKeyPath),
+						}),
+					}),
+					Schema: schemaResp.Schema,
+				},
+			},
+		},
+		{
+			description: "happy path, global profile dir",
+			execResponses: map[string][]sshtest.Response{
+				"/nix/store/test-profile-path/activate": {{}},
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
+					Stdout: []byte("something went wrong\n"),
+					Status: 2,
+				}},
+				`stat -c %Y "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`: {{
+					Stdout: []byte(strconv.FormatInt(now.Unix(), 10)),
+				}},
+			},
+			expectedRequests: []string{
+				"/nix/store/test-profile-path/activate",
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
+				`stat -c %Y "${NIX_STATE_DIR:-/nix/var/nix}/profiles/per-user/$USER/home-manager"`,
 			},
 			expectedResp: resource.UpdateResponse{
 				State: tfsdk.State{
@@ -564,16 +670,14 @@ func TestOSResource_Update(t *testing.T) {
 		{
 			description: "stat fails",
 			execResponses: map[string][]sshtest.Response{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch":            {{}},
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path": {{}},
-				"stat -c %Y /run/current-system": {{
+				"/nix/store/test-profile-path/activate": {{}},
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`: {{
 					Stdout: []byte("bogus"),
 				}},
 			},
 			expectedRequests: []string{
-				"/nix/store/test-profile-path/bin/switch-to-configuration switch",
-				"nix-env -p /nix/var/nix/profiles/system --set /nix/store/test-profile-path",
-				"stat -c %Y /run/current-system",
+				"/nix/store/test-profile-path/activate",
+				`stat -c %Y "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"`,
 			},
 			expectedResp: resource.UpdateResponse{
 				State: tfsdk.State{
@@ -609,7 +713,7 @@ func TestOSResource_Update(t *testing.T) {
 				},
 			}
 
-			osResource{}.Update(context.Background(), resource.UpdateRequest{
+			hmEnvResource{}.Update(context.Background(), resource.UpdateRequest{
 				Plan: tfsdk.Plan{
 					Raw: tftypes.NewValue(tftypes.Object{
 						AttributeTypes: map[string]tftypes.Type{

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"golang.org/x/crypto/ssh"
@@ -96,4 +98,38 @@ func output(session *ssh.Session, cmd string) ([]byte, error) {
 	}
 
 	return stdout.Bytes(), nil
+}
+
+// statRemoteSymlinks runs `stat -c %Y path` for each provided path on the
+// remote host and returns the mtime output and true if any runs are successful.
+// If errors are encountered for all paths, the final one will be added to
+// diagnostics and false is returned.
+func statRemoteSymlinks(client *ssh.Client, paths []string, diagnostics *diag.Diagnostics) (mtime time.Time, ok bool) {
+	var statOutput []byte
+	for {
+		session := createSession(client, diagnostics)
+		if session == nil {
+			return time.Time{}, false
+		}
+
+		var err error
+		statOutput, err = output(session, "stat -c %Y "+paths[0])
+
+		if err == nil {
+			break
+		} // err != nil
+
+		paths = paths[1:]
+		if len(paths) == 0 {
+			reportErrorWithTitle(err, "Failed to Stat Remote Symlink", diagnostics)
+			return time.Time{}, false
+		}
+	}
+
+	epoch, err := strconv.ParseInt(strings.TrimSuffix(string(statOutput), "\n"), 10, 64)
+	if reportErrorWithTitle(err, "Failed to Parse Stat Output As Epoch Timestamp Integer", diagnostics) {
+		return time.Time{}, false
+	}
+
+	return time.Unix(epoch, 0), true
 }

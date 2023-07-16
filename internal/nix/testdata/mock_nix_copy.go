@@ -15,11 +15,14 @@ func main() {
 		panic(actualArgs)
 	}
 
-	expectedSSHOpts := fmt.Sprintf("-p %s -i %s",
-		os.Getenv("MOCK_NIX_COPY_EXPECTED_PORT"),
+	expectedSSHPortOpt := fmt.Sprintf("-p %s",
+		os.Getenv("MOCK_NIX_COPY_EXPECTED_PORT"))
+	expectedSSHPrivateKeyOpt := fmt.Sprintf("-i %s",
 		os.Getenv("MOCK_NIX_COPY_EXPECTED_PRIVATE_KEY_PATH"))
 	actualSSHOpts := os.Getenv("NIX_SSHOPTS")
-	if actualSSHOpts != expectedSSHOpts {
+	if !strings.Contains(actualSSHOpts, expectedSSHPortOpt) ||
+		!strings.Contains(actualSSHOpts, expectedSSHPrivateKeyOpt) {
+
 		panic(actualSSHOpts)
 	}
 

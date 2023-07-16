@@ -21,7 +21,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func TestOSResourceModel_sshClient(t *testing.T) {
+func TestSSHConnModel_sshClient(t *testing.T) {
 	type summaryDetailPair struct {
 		summary, detail string
 	}
