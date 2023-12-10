@@ -12,7 +12,7 @@
         pname = "terraform-provider-nix";
         version = builtins.readFile version/version.txt;
         src = builtins.path { path = ./.; name = "terraform-provider-nix-src"; };
-        vendorSha256 = null;
+        vendorHash = null;
         nativeBuildInputs = [ final.terraform ];
         postBuild = ''
           go generate
