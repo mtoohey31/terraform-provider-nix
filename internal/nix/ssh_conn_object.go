@@ -164,7 +164,7 @@ func (s sshConnModel) copyStorePath(path string, diagnostics *diag.Diagnostics) 
 	// the ssh stuff as pure and deterministic as possible
 
 	remoteURI := fmt.Sprintf("ssh://%s@%s", s.User.ValueString(), s.Host.ValueString())
-	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command", "copy", "--to", remoteURI, path)
+	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command", "copy", "--substitute-on-destination", "--to", remoteURI, path)
 	envEntry := "NIX_SSHOPTS=-o BatchMode=yes" // Disable interactive prompts.
 
 	// Set remote port

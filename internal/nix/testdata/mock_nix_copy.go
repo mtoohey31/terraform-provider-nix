@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	expectedArgs := fmt.Sprintf("--extra-experimental-features nix-command copy --to ssh://test-user@%s /nix/store/test-profile-path",
+	expectedArgs := fmt.Sprintf("--extra-experimental-features nix-command copy --substitute-on-destination --to ssh://test-user@%s /nix/store/test-profile-path",
 		os.Getenv("MOCK_NIX_COPY_EXPECTED_HOST"))
 	actualArgs := strings.Join(os.Args[1:], " ")
 	if actualArgs != expectedArgs {
