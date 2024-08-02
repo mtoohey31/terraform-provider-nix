@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package toproto5
 
 import (
@@ -17,6 +20,7 @@ func PlanResourceChangeResponse(ctx context.Context, fw *fwserver.PlanResourceCh
 	}
 
 	proto5 := &tfprotov5.PlanResourceChangeResponse{
+		Deferred:    ResourceDeferred(fw.Deferred),
 		Diagnostics: Diagnostics(ctx, fw.Diagnostics),
 	}
 

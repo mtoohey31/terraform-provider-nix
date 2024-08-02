@@ -37,5 +37,3 @@ data "nix_drv" "hello" {
 ### Read-Only
 
 - `out_path` (String) The store path produced by the derivation.
-
-

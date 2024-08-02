@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-exec/tfexec"
 
 	"github.com/hashicorp/terraform-plugin-testing/internal/logging"
@@ -42,6 +43,7 @@ type Helper struct {
 	// for tests that use fixture files.
 	sourceDir     string
 	terraformExec string
+	terraformVer  *version.Version
 
 	// execTempDir is created during DiscoverConfig to store any downloaded
 	// binaries
@@ -78,11 +80,23 @@ func InitHelper(ctx context.Context, config *Config) (*Helper, error) {
 		return nil, fmt.Errorf("failed to create temporary directory for test helper: %s", err)
 	}
 
+	tf, err := tfexec.NewTerraform(baseDir, config.TerraformExec)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create terraform-exec instance: %w", err)
+	}
+
+	tfVersion, _, err := tf.Version(ctx, false)
+
+	if err != nil {
+		return nil, fmt.Errorf("error calling terraform version command: %w", err)
+	}
+
 	return &Helper{
 		baseDir:       baseDir,
 		sourceDir:     config.SourceDir,
 		terraformExec: config.TerraformExec,
 		execTempDir:   config.execTempDir,
+		terraformVer:  tfVersion,
 	}, nil
 }
 
@@ -92,6 +106,10 @@ func InitHelper(ctx context.Context, config *Config) (*Helper, error) {
 // Call this before returning from TestMain to minimize the amount of detritus
 // left behind in the filesystem after the tests complete.
 func (h *Helper) Close() error {
+	if os.Getenv(EnvTfAccPersistWorkingDir) != "" {
+		return nil
+	}
+
 	if h.execTempDir != "" {
 		err := os.RemoveAll(h.execTempDir)
 		if err != nil {
@@ -296,4 +314,9 @@ func (h *Helper) WorkingDirectory() string {
 // should be used when running tests.
 func (h *Helper) TerraformExecPath() string {
 	return h.terraformExec
+}
+
+// TerraformVersion returns the Terraform CLI version being used when running tests.
+func (h *Helper) TerraformVersion() *version.Version {
+	return h.terraformVer
 }

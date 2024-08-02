@@ -1,14 +1,18 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package basetypes
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/attr/xattr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 var _ ListTypable = ListType{}
@@ -31,6 +35,10 @@ type ListType struct {
 
 // ElementType returns the attr.Type elements will be created from.
 func (l ListType) ElementType() attr.Type {
+	if l.ElemType == nil {
+		return missingType{}
+	}
+
 	return l.ElemType
 }
 
@@ -47,7 +55,7 @@ func (l ListType) WithElementType(typ attr.Type) attr.TypeWithElementType {
 // can understand.
 func (l ListType) TerraformType(ctx context.Context) tftypes.Type {
 	return tftypes.List{
-		ElementType: l.ElemType.TerraformType(ctx),
+		ElementType: l.ElementType().TerraformType(ctx),
 	}
 }
 
@@ -56,16 +64,30 @@ func (l ListType) TerraformType(ctx context.Context) tftypes.Type {
 // type for the provider to consume the data with.
 func (l ListType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (attr.Value, error) {
 	if in.Type() == nil {
-		return NewListNull(l.ElemType), nil
+		return NewListNull(l.ElementType()), nil
 	}
+
+	// MAINTAINER NOTE:
+	// ListType does not support DynamicType as an element type. It is not explicitly prevented from being created with the
+	// Framework type system, but the Framework-supported ListAttribute, ListNestedAttribute, and ListNestedBlock all prevent DynamicType
+	// from being used as an element type. An attempt to use DynamicType as the element type will eventually lead you to an error on this line :)
+	//
+	// In the future, if we ever need to support a list of dynamic element types, this type equality check will need to be modified to allow
+	// dynamic types to not return an error, as the tftypes.Value coming in (if known) will be a concrete value, for example:
+	//
+	// - l.TerraformType(ctx): tftypes.List[tftypes.DynamicPseudoType]
+	// - in.Type(): tftypes.List[tftypes.String]
+	//
+	// The `ValueFromTerraform` function for a dynamic type will be able create the correct concrete dynamic value with this modification in place.
+	//
 	if !in.Type().Equal(l.TerraformType(ctx)) {
-		return nil, fmt.Errorf("can't use %s as value of List with ElementType %T, can only use %s values", in.String(), l.ElemType, l.ElemType.TerraformType(ctx).String())
+		return nil, fmt.Errorf("can't use %s as value of List with ElementType %T, can only use %s values", in.String(), l.ElementType(), l.ElementType().TerraformType(ctx).String())
 	}
 	if !in.IsKnown() {
-		return NewListUnknown(l.ElemType), nil
+		return NewListUnknown(l.ElementType()), nil
 	}
 	if in.IsNull() {
-		return NewListNull(l.ElemType), nil
+		return NewListNull(l.ElementType()), nil
 	}
 	val := []tftypes.Value{}
 	err := in.As(&val)
@@ -74,7 +96,7 @@ func (l ListType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (att
 	}
 	elems := make([]attr.Value, 0, len(val))
 	for _, elem := range val {
-		av, err := l.ElemType.ValueFromTerraform(ctx, elem)
+		av, err := l.ElementType().ValueFromTerraform(ctx, elem)
 		if err != nil {
 			return nil, err
 		}
@@ -82,19 +104,23 @@ func (l ListType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (att
 	}
 	// ValueFromTerraform above on each element should make this safe.
 	// Otherwise, this will need to do some Diagnostics to error conversion.
-	return NewListValueMust(l.ElemType, elems), nil
+	return NewListValueMust(l.ElementType(), elems), nil
 }
 
 // Equal returns true if `o` is also a ListType and has the same ElemType.
 func (l ListType) Equal(o attr.Type) bool {
-	if l.ElemType == nil {
+	// Preserve prior ElemType nil check behavior
+	if l.ElementType().Equal(missingType{}) {
 		return false
 	}
+
 	other, ok := o.(ListType)
+
 	if !ok {
 		return false
 	}
-	return l.ElemType.Equal(other.ElemType)
+
+	return l.ElementType().Equal(other.ElementType())
 }
 
 // ApplyTerraform5AttributePathStep applies the given AttributePathStep to the
@@ -104,12 +130,12 @@ func (l ListType) ApplyTerraform5AttributePathStep(step tftypes.AttributePathSte
 		return nil, fmt.Errorf("cannot apply step %T to ListType", step)
 	}
 
-	return l.ElemType, nil
+	return l.ElementType(), nil
 }
 
 // String returns a human-friendly description of the ListType.
 func (l ListType) String() string {
-	return "types.ListType[" + l.ElemType.String() + "]"
+	return "types.ListType[" + l.ElementType().String() + "]"
 }
 
 // Validate validates all elements of the list that are of type
@@ -146,7 +172,8 @@ func (l ListType) Validate(ctx context.Context, in tftypes.Value, path path.Path
 		return diags
 	}
 
-	validatableType, isValidatable := l.ElemType.(xattr.TypeWithValidate)
+	//nolint:staticcheck // xattr.TypeWithValidate is deprecated, but we still need to support it.
+	validatableType, isValidatable := l.ElementType().(xattr.TypeWithValidate)
 	if !isValidatable {
 		return diags
 	}
@@ -164,7 +191,7 @@ func (l ListType) Validate(ctx context.Context, in tftypes.Value, path path.Path
 // ValueType returns the Value type.
 func (l ListType) ValueType(_ context.Context) attr.Value {
 	return ListValue{
-		elementType: l.ElemType,
+		elementType: l.ElementType(),
 	}
 }
 

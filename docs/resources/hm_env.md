@@ -63,5 +63,3 @@ Required:
 Optional:
 
 - `port` (Number) Port to connect to with SSH. Defaults to `22`.
-
-

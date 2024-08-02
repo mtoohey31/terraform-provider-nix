@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package toproto5
 
 import (
@@ -16,6 +19,7 @@ func ReadResourceResponse(ctx context.Context, fw *fwserver.ReadResourceResponse
 	}
 
 	proto5 := &tfprotov5.ReadResourceResponse{
+		Deferred:    ResourceDeferred(fw.Deferred),
 		Diagnostics: Diagnostics(ctx, fw.Diagnostics),
 	}
 

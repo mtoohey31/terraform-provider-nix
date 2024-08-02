@@ -1,9 +1,13 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package fwserver
 
 import (
 	"context"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/internal/fwschemadata"
 	"github.com/hashicorp/terraform-plugin-framework/internal/logging"
 	"github.com/hashicorp/terraform-plugin-framework/internal/privatestate"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -13,15 +17,17 @@ import (
 // ReadResourceRequest is the framework server request for the
 // ReadResource RPC.
 type ReadResourceRequest struct {
-	CurrentState *tfsdk.State
-	Resource     resource.Resource
-	Private      *privatestate.Data
-	ProviderMeta *tfsdk.Config
+	ClientCapabilities resource.ReadClientCapabilities
+	CurrentState       *tfsdk.State
+	Resource           resource.Resource
+	Private            *privatestate.Data
+	ProviderMeta       *tfsdk.Config
 }
 
 // ReadResourceResponse is the framework server response for the
 // ReadResource RPC.
 type ReadResourceResponse struct {
+	Deferred    *resource.Deferred
 	Diagnostics diag.Diagnostics
 	NewState    *tfsdk.State
 	Private     *privatestate.Data
@@ -43,6 +49,19 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 		return
 	}
 
+	if s.deferred != nil {
+		logging.FrameworkDebug(ctx, "Provider has deferred response configured, automatically returning deferred response.",
+			map[string]interface{}{
+				logging.KeyDeferredReason: s.deferred.Reason.String(),
+			},
+		)
+		resp.NewState = req.CurrentState
+		resp.Deferred = &resource.Deferred{
+			Reason: resource.DeferredReason(s.deferred.Reason),
+		}
+		return
+	}
+
 	if resourceWithConfigure, ok := req.Resource.(resource.ResourceWithConfigure); ok {
 		logging.FrameworkTrace(ctx, "Resource implements ResourceWithConfigure")
 
@@ -51,9 +70,9 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 		}
 		configureResp := resource.ConfigureResponse{}
 
-		logging.FrameworkDebug(ctx, "Calling provider defined Resource Configure")
+		logging.FrameworkTrace(ctx, "Calling provider defined Resource Configure")
 		resourceWithConfigure.Configure(ctx, configureReq, &configureResp)
-		logging.FrameworkDebug(ctx, "Called provider defined Resource Configure")
+		logging.FrameworkTrace(ctx, "Called provider defined Resource Configure")
 
 		resp.Diagnostics.Append(configureResp.Diagnostics...)
 
@@ -63,6 +82,7 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 	}
 
 	readReq := resource.ReadRequest{
+		ClientCapabilities: req.ClientCapabilities,
 		State: tfsdk.State{
 			Schema: req.CurrentState.Schema,
 			Raw:    req.CurrentState.Raw.Copy(),
@@ -93,12 +113,13 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 		resp.Private = req.Private
 	}
 
-	logging.FrameworkDebug(ctx, "Calling provider defined Resource Read")
+	logging.FrameworkTrace(ctx, "Calling provider defined Resource Read")
 	req.Resource.Read(ctx, readReq, &readResp)
-	logging.FrameworkDebug(ctx, "Called provider defined Resource Read")
+	logging.FrameworkTrace(ctx, "Called provider defined Resource Read")
 
 	resp.Diagnostics = readResp.Diagnostics
 	resp.NewState = &readResp.State
+	resp.Deferred = readResp.Deferred
 
 	if readResp.Private != nil {
 		if resp.Private == nil {
@@ -107,4 +128,40 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 
 		resp.Private.Provider = readResp.Private
 	}
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	semanticEqualityReq := SchemaSemanticEqualityRequest{
+		PriorData: fwschemadata.Data{
+			Description:    fwschemadata.DataDescriptionState,
+			Schema:         req.CurrentState.Schema,
+			TerraformValue: req.CurrentState.Raw.Copy(),
+		},
+		ProposedNewData: fwschemadata.Data{
+			Description:    fwschemadata.DataDescriptionState,
+			Schema:         resp.NewState.Schema,
+			TerraformValue: resp.NewState.Raw.Copy(),
+		},
+	}
+	semanticEqualityResp := &SchemaSemanticEqualityResponse{
+		NewData: semanticEqualityReq.ProposedNewData,
+	}
+
+	SchemaSemanticEquality(ctx, semanticEqualityReq, semanticEqualityResp)
+
+	resp.Diagnostics.Append(semanticEqualityResp.Diagnostics...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if semanticEqualityResp.NewData.TerraformValue.Equal(resp.NewState.Raw) {
+		return
+	}
+
+	logging.FrameworkDebug(ctx, "State updated due to semantic equality")
+
+	resp.NewState.Raw = semanticEqualityResp.NewData.TerraformValue
 }

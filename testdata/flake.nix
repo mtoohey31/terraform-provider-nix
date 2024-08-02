@@ -105,7 +105,7 @@
                     "terraform-provider-nix-filesystem-mirror".source =
                       pkgs.terraform-provider-nix-filesystem-mirror;
                   };
-                  systemPackages = [ pkgs.terraform ];
+                  systemPackages = [ pkgs.opentofu ];
                 };
               };
             };
@@ -125,19 +125,19 @@
           server.wait_for_open_port(${toString sshPort})
           client.wait_for_unit("network.target")
 
-          client.succeed("terraform init")
-          client.succeed("terraform apply -auto-approve")
+          client.succeed("tofu init")
+          client.succeed("tofu apply -auto-approve")
 
           server.succeed("stat ~/1")
           server.fail("stat ~/2")
 
-          client.succeed("terraform apply -auto-approve")
+          client.succeed("tofu apply -auto-approve")
 
           server.succeed("stat ~/1")
           server.fail("stat ~/2")
 
           client.succeed('sed -i "s,$(realpath /etc/server-profile1),$(realpath /etc/server-profile2),g" main.tf')
-          client.succeed("terraform apply -auto-approve")
+          client.succeed("tofu apply -auto-approve")
 
           server.fail("stat ~/1")
           server.succeed("stat ~/2")

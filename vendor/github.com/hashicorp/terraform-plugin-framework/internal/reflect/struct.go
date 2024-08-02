@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package reflect
 
 import (
@@ -6,11 +9,12 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/attr/xattr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // Struct builds a new struct using the data in `object`, as long as `object`
@@ -164,10 +168,56 @@ func FromStruct(ctx context.Context, typ attr.TypeWithAttributeTypes, val reflec
 	}
 
 	attrTypes := typ.AttributeTypes()
+
+	var objectMissing, structMissing []string
+
+	for field := range targetFields {
+		if _, ok := attrTypes[field]; !ok {
+			objectMissing = append(objectMissing, field)
+		}
+	}
+
+	for attrName, attrType := range attrTypes {
+		if attrType == nil {
+			objectMissing = append(objectMissing, attrName)
+		}
+
+		if _, ok := targetFields[attrName]; !ok {
+			structMissing = append(structMissing, attrName)
+		}
+	}
+
+	if len(objectMissing) > 0 || len(structMissing) > 0 {
+		missing := make([]string, 0, len(objectMissing)+len(structMissing))
+
+		if len(objectMissing) > 0 {
+			missing = append(missing, fmt.Sprintf("Struct defines fields not found in object: %s.", commaSeparatedString(objectMissing)))
+		}
+
+		if len(structMissing) > 0 {
+			missing = append(missing, fmt.Sprintf("Object defines fields not found in struct: %s.", commaSeparatedString(structMissing)))
+		}
+
+		diags.AddAttributeError(
+			path,
+			"Value Conversion Error",
+			"An unexpected error was encountered trying to convert from struct into an object. "+
+				"This is always an error in the provider. Please report the following to the provider developer:\n\n"+
+				fmt.Sprintf("Mismatch between struct and object type: %s\n", strings.Join(missing, " "))+
+				fmt.Sprintf("Struct: %s\n", val.Type())+
+				fmt.Sprintf("Object type: %s", typ),
+		)
+
+		return nil, diags
+	}
+
 	for name, fieldNo := range targetFields {
 		path := path.AtName(name)
 		fieldValue := val.Field(fieldNo)
 
+		// If the attr implements xattr.ValidateableAttribute, or xattr.TypeWithValidate,
+		// and the attr does not validate then diagnostics will be added here and returned
+		// before reaching the switch statement below.
 		attrVal, attrValDiags := FromValue(ctx, attrTypes[name], fieldValue.Interface(), path)
 		diags.Append(attrValDiags...)
 
@@ -175,51 +225,85 @@ func FromStruct(ctx context.Context, typ attr.TypeWithAttributeTypes, val reflec
 			return nil, diags
 		}
 
-		attrType, ok := attrTypes[name]
-		if !ok || attrType == nil {
-			err := fmt.Errorf("couldn't find type information for attribute at %s in supplied attr.Type %T", path, typ)
-			diags.AddAttributeError(
-				path,
-				"Value Conversion Error",
-				"An unexpected error was encountered trying to convert from struct value. This is always an error in the provider. Please report the following to the provider developer:\n\n"+err.Error(),
-			)
-			return nil, diags
-		}
-
-		objTypes[name] = attrType.TerraformType(ctx)
-
 		tfObjVal, err := attrVal.ToTerraformValue(ctx)
 		if err != nil {
 			return nil, append(diags, toTerraformValueErrorDiag(err, path))
 		}
 
-		if typeWithValidate, ok := typ.(xattr.TypeWithValidate); ok {
-			diags.Append(typeWithValidate.Validate(ctx, tfObjVal, path)...)
+		switch t := attrVal.(type) {
+		case xattr.ValidateableAttribute:
+			resp := xattr.ValidateAttributeResponse{}
+
+			t.ValidateAttribute(ctx,
+				xattr.ValidateAttributeRequest{
+					Path: path,
+				},
+				&resp,
+			)
+
+			diags.Append(resp.Diagnostics...)
 
 			if diags.HasError() {
 				return nil, diags
 			}
+		default:
+			//nolint:staticcheck // xattr.TypeWithValidate is deprecated, but we still need to support it.
+			if typeWithValidate, ok := attrTypes[name].(xattr.TypeWithValidate); ok {
+				diags.Append(typeWithValidate.Validate(ctx, tfObjVal, path)...)
+
+				if diags.HasError() {
+					return nil, diags
+				}
+			}
+		}
+
+		tfObjTyp := tfObjVal.Type()
+
+		// If the original attribute type is tftypes.DynamicPseudoType, the value could end up being
+		// a concrete type (like tftypes.String, tftypes.List, etc.). In this scenario, the type used
+		// to build the final tftypes.Object must stay as tftypes.DynamicPseudoType
+		if attrTypes[name].TerraformType(ctx).Is(tftypes.DynamicPseudoType) {
+			tfObjTyp = tftypes.DynamicPseudoType
 		}
 
 		objValues[name] = tfObjVal
+		objTypes[name] = tfObjTyp
 	}
 
 	tfVal := tftypes.NewValue(tftypes.Object{
 		AttributeTypes: objTypes,
 	}, objValues)
 
-	if typeWithValidate, ok := typ.(xattr.TypeWithValidate); ok {
-		diags.Append(typeWithValidate.Validate(ctx, tfVal, path)...)
+	ret, err := typ.ValueFromTerraform(ctx, tfVal)
+	if err != nil {
+		return nil, append(diags, valueFromTerraformErrorDiag(err, path))
+	}
+
+	switch t := ret.(type) {
+	case xattr.ValidateableAttribute:
+		resp := xattr.ValidateAttributeResponse{}
+
+		t.ValidateAttribute(ctx,
+			xattr.ValidateAttributeRequest{
+				Path: path,
+			},
+			&resp,
+		)
+
+		diags.Append(resp.Diagnostics...)
 
 		if diags.HasError() {
 			return nil, diags
 		}
-	}
+	default:
+		//nolint:staticcheck // xattr.TypeWithValidate is deprecated, but we still need to support it.
+		if typeWithValidate, ok := typ.(xattr.TypeWithValidate); ok {
+			diags.Append(typeWithValidate.Validate(ctx, tfVal, path)...)
 
-	retType := typ.WithAttributeTypes(attrTypes)
-	ret, err := retType.ValueFromTerraform(ctx, tfVal)
-	if err != nil {
-		return nil, append(diags, valueFromTerraformErrorDiag(err, path))
+			if diags.HasError() {
+				return nil, diags
+			}
+		}
 	}
 
 	return ret, diags

@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package basetypes
 
 import (
@@ -22,6 +25,22 @@ type ListValuable interface {
 
 	// ToListValue should convert the value type to a List.
 	ToListValue(ctx context.Context) (ListValue, diag.Diagnostics)
+}
+
+// ListValuableWithSemanticEquals extends ListValuable with semantic equality
+// logic.
+type ListValuableWithSemanticEquals interface {
+	ListValuable
+
+	// ListSemanticEquals should return true if the given value is
+	// semantically equal to the current value. This logic is used to prevent
+	// Terraform data consistency errors and resource drift where a value change
+	// may have inconsequential differences, such as computed elements added by
+	// a remote system.
+	//
+	// Only known values are compared with this method as changing a value's
+	// state implicitly represents a different value.
+	ListSemanticEquals(context.Context, ListValuable) (bool, diag.Diagnostics)
 }
 
 // NewListNull creates a List with a null value. Determine whether the value is
@@ -190,6 +209,19 @@ func (l ListValue) ToTerraformValue(ctx context.Context) (tftypes.Value, error) 
 
 	switch l.state {
 	case attr.ValueStateKnown:
+		// MAINTAINER NOTE:
+		// ListValue does not support DynamicType as an element type. It is not explicitly prevented from being created with the
+		// Framework type system, but the Framework-supported ListAttribute, ListNestedAttribute, and ListNestedBlock all prevent DynamicType
+		// from being used as an element type.
+		//
+		// In the future, if we ever need to support a list of dynamic element types, this tftypes.List creation logic will need to be modified to ensure
+		// that known values contain the exact same concrete element type, specifically with unknown and null values. Dynamic values will return the correct concrete
+		// element type for known values from `elem.ToTerraformValue`, but unknown and null values will be tftypes.DynamicPseudoType, causing an error due to multiple element
+		// types in a tftypes.List.
+		//
+		// Unknown and null element types of tftypes.DynamicPseudoType must be recreated as the concrete element type unknown/null value. This can be done by checking `l.elements`
+		// for a single concrete type (i.e. not tftypes.DynamicPseudoType), and using that concrete type to create unknown and null dynamic values later.
+		//
 		vals := make([]tftypes.Value, 0, len(l.elements))
 
 		for _, elem := range l.elements {
@@ -223,6 +255,11 @@ func (l ListValue) Equal(o attr.Value) bool {
 	other, ok := o.(ListValue)
 
 	if !ok {
+		return false
+	}
+
+	// A list with no elementType is an invalid state
+	if l.elementType == nil || other.elementType == nil {
 		return false
 	}
 

@@ -1,11 +1,17 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package schema
 
 import (
+	"context"
+
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/internal/fwschema"
 	"github.com/hashicorp/terraform-plugin-framework/internal/fwschema/fwxschema"
+	"github.com/hashicorp/terraform-plugin-framework/internal/fwtype"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/defaults"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -15,10 +21,11 @@ import (
 
 // Ensure the implementation satisfies the desired interfaces.
 var (
-	_ Attribute                                  = ObjectAttribute{}
-	_ fwschema.AttributeWithObjectDefaultValue   = ObjectAttribute{}
-	_ fwxschema.AttributeWithObjectPlanModifiers = ObjectAttribute{}
-	_ fwxschema.AttributeWithObjectValidators    = ObjectAttribute{}
+	_ Attribute                                    = ObjectAttribute{}
+	_ fwschema.AttributeWithValidateImplementation = ObjectAttribute{}
+	_ fwschema.AttributeWithObjectDefaultValue     = ObjectAttribute{}
+	_ fwxschema.AttributeWithObjectPlanModifiers   = ObjectAttribute{}
+	_ fwxschema.AttributeWithObjectValidators      = ObjectAttribute{}
 )
 
 // ObjectAttribute represents a schema attribute that is an object with only
@@ -45,6 +52,10 @@ var (
 type ObjectAttribute struct {
 	// AttributeTypes is the mapping of underlying attribute names to attribute
 	// types. This field must be set.
+	//
+	// Attribute types that contain a collection with a nested dynamic type (i.e. types.List[types.Dynamic]) are not supported.
+	// If underlying dynamic collection values are required, replace this attribute definition with
+	// DynamicAttribute instead.
 	AttributeTypes map[string]attr.Type
 
 	// CustomType enables the use of a custom attribute type in place of the
@@ -236,4 +247,45 @@ func (a ObjectAttribute) ObjectPlanModifiers() []planmodifier.Object {
 // ObjectValidators returns the Validators field value.
 func (a ObjectAttribute) ObjectValidators() []validator.Object {
 	return a.Validators
+}
+
+// ValidateImplementation contains logic for validating the
+// provider-defined implementation of the attribute to prevent unexpected
+// errors or panics. This logic runs during the GetProviderSchema RPC and
+// should never include false positives.
+func (a ObjectAttribute) ValidateImplementation(ctx context.Context, req fwschema.ValidateImplementationRequest, resp *fwschema.ValidateImplementationResponse) {
+	if a.AttributeTypes == nil && a.CustomType == nil {
+		resp.Diagnostics.Append(fwschema.AttributeMissingAttributeTypesDiag(req.Path))
+	}
+
+	if a.CustomType == nil && fwtype.ContainsCollectionWithDynamic(a.GetType()) {
+		resp.Diagnostics.Append(fwtype.AttributeCollectionWithDynamicTypeDiag(req.Path))
+	}
+
+	if a.ObjectDefaultValue() != nil {
+		if !a.IsComputed() {
+			resp.Diagnostics.Append(nonComputedAttributeWithDefaultDiag(req.Path))
+		}
+
+		// Validate Default implementation. This is safe unless the framework
+		// ever allows more dynamic Default implementations at which the
+		// implementation would be required to be validated at runtime.
+		// Reference: https://github.com/hashicorp/terraform-plugin-framework/issues/930
+		defaultReq := defaults.ObjectRequest{
+			Path: req.Path,
+		}
+		defaultResp := &defaults.ObjectResponse{}
+
+		a.ObjectDefaultValue().DefaultObject(ctx, defaultReq, defaultResp)
+
+		resp.Diagnostics.Append(defaultResp.Diagnostics...)
+
+		if defaultResp.Diagnostics.HasError() {
+			return
+		}
+
+		if a.AttributeTypes != nil && !a.GetType().Equal(defaultResp.PlanValue.Type(ctx)) {
+			resp.Diagnostics.Append(fwschema.AttributeDefaultTypeMismatchDiag(req.Path, a.GetType(), defaultResp.PlanValue.Type(ctx)))
+		}
+	}
 }

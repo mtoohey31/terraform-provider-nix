@@ -1,13 +1,17 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package proto6server
 
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+
 	"github.com/hashicorp/terraform-plugin-framework/internal/fromproto6"
 	"github.com/hashicorp/terraform-plugin-framework/internal/fwserver"
 	"github.com/hashicorp/terraform-plugin-framework/internal/logging"
 	"github.com/hashicorp/terraform-plugin-framework/internal/toproto6"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
 // PlanResourceChange satisfies the tfprotov6.ProviderServer interface.
@@ -41,7 +45,15 @@ func (s *Server) PlanResourceChange(ctx context.Context, proto6Req *tfprotov6.Pl
 		return toproto6.PlanResourceChangeResponse(ctx, fwResp), nil
 	}
 
-	fwReq, diags := fromproto6.PlanResourceChangeRequest(ctx, proto6Req, resource, resourceSchema, providerMetaSchema)
+	resourceBehavior, diags := s.FrameworkServer.ResourceBehavior(ctx, proto6Req.TypeName)
+
+	fwResp.Diagnostics.Append(diags...)
+
+	if fwResp.Diagnostics.HasError() {
+		return toproto6.PlanResourceChangeResponse(ctx, fwResp), nil
+	}
+
+	fwReq, diags := fromproto6.PlanResourceChangeRequest(ctx, proto6Req, resource, resourceSchema, providerMetaSchema, resourceBehavior)
 
 	fwResp.Diagnostics.Append(diags...)
 

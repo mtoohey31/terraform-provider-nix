@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package basetypes
 
 import (
@@ -23,6 +26,22 @@ type ObjectValuable interface {
 
 	// ToObjectValue should convert the value type to an Object.
 	ToObjectValue(ctx context.Context) (ObjectValue, diag.Diagnostics)
+}
+
+// ObjectValuableWithSemanticEquals extends ObjectValuable with semantic
+// equality logic.
+type ObjectValuableWithSemanticEquals interface {
+	ObjectValuable
+
+	// ObjectSemanticEquals should return true if the given value is
+	// semantically equal to the current value. This logic is used to prevent
+	// Terraform data consistency errors and resource drift where a value change
+	// may have inconsequential differences, such as computed attribute values
+	// changed by a remote system.
+	//
+	// Only known values are compared with this method as changing a value's
+	// state implicitly represents a different value.
+	ObjectSemanticEquals(context.Context, ObjectValuable) (bool, diag.Diagnostics)
 }
 
 // NewObjectNull creates a Object with a null value. Determine whether the value is
@@ -243,10 +262,12 @@ func (o ObjectValue) Type(ctx context.Context) attr.Type {
 // ToTerraformValue returns the data contained in the attr.Value as
 // a tftypes.Value.
 func (o ObjectValue) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
-	attrTypes := map[string]tftypes.Type{}
-	for attr, typ := range o.AttributeTypes(ctx) {
+	attrTypes := make(map[string]tftypes.Type, len(o.attributeTypes))
+
+	for attr, typ := range o.attributeTypes {
 		attrTypes[attr] = typ.TerraformType(ctx)
 	}
+
 	objectType := tftypes.Object{AttributeTypes: attrTypes}
 
 	switch o.state {

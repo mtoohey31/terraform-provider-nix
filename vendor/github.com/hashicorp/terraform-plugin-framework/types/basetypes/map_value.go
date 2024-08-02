@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package basetypes
 
 import (
@@ -23,6 +26,22 @@ type MapValuable interface {
 
 	// ToMapValue should convert the value type to a Map.
 	ToMapValue(ctx context.Context) (MapValue, diag.Diagnostics)
+}
+
+// MapValuableWithSemanticEquals extends MapValuable with semantic equality
+// logic.
+type MapValuableWithSemanticEquals interface {
+	MapValuable
+
+	// MapSemanticEquals should return true if the given value is
+	// semantically equal to the current value. This logic is used to prevent
+	// Terraform data consistency errors and resource drift where a value change
+	// may have inconsequential differences, such as computed elements added by
+	// a remote system.
+	//
+	// Only known values are compared with this method as changing a value's
+	// state implicitly represents a different value.
+	MapSemanticEquals(context.Context, MapValuable) (bool, diag.Diagnostics)
 }
 
 // NewMapNull creates a Map with a null value. Determine whether the value is
@@ -197,6 +216,19 @@ func (m MapValue) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
 
 	switch m.state {
 	case attr.ValueStateKnown:
+		// MAINTAINER NOTE:
+		// MapValue does not support DynamicType as an element type. It is not explicitly prevented from being created with the
+		// Framework type system, but the Framework-supported MapAttribute and MapNestedAttribute prevent DynamicType
+		// from being used as an element type.
+		//
+		// In the future, if we ever need to support a map of dynamic element types, this tftypes.Map creation logic will need to be modified to ensure
+		// that known values contain the exact same concrete element type, specifically with unknown and null values. Dynamic values will return the correct concrete
+		// element type for known values from `elem.ToTerraformValue`, but unknown and null values will be tftypes.DynamicPseudoType, causing an error due to multiple element
+		// types in a tftypes.Map.
+		//
+		// Unknown and null element types of tftypes.DynamicPseudoType must be recreated as the concrete element type unknown/null value. This can be done by checking `m.elements`
+		// for a single concrete type (i.e. not tftypes.DynamicPseudoType), and using that concrete type to create unknown and null dynamic values later.
+		//
 		vals := make(map[string]tftypes.Value, len(m.elements))
 
 		for key, elem := range m.elements {
@@ -230,6 +262,11 @@ func (m MapValue) Equal(o attr.Value) bool {
 	other, ok := o.(MapValue)
 
 	if !ok {
+		return false
+	}
+
+	// A map with no elementType is an invalid state
+	if m.elementType == nil || other.elementType == nil {
 		return false
 	}
 

@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package fwserver
 
 import (
@@ -36,9 +39,9 @@ func (s *Server) ValidateDataSourceConfig(ctx context.Context, req *ValidateData
 		}
 		configureResp := datasource.ConfigureResponse{}
 
-		logging.FrameworkDebug(ctx, "Calling provider defined DataSource Configure")
+		logging.FrameworkTrace(ctx, "Calling provider defined DataSource Configure")
 		dataSourceWithConfigure.Configure(ctx, configureReq, &configureResp)
-		logging.FrameworkDebug(ctx, "Called provider defined DataSource Configure")
+		logging.FrameworkTrace(ctx, "Called provider defined DataSource Configure")
 
 		resp.Diagnostics.Append(configureResp.Diagnostics...)
 
@@ -59,7 +62,7 @@ func (s *Server) ValidateDataSourceConfig(ctx context.Context, req *ValidateData
 			// from modifying or removing diagnostics.
 			vdscResp := &datasource.ValidateConfigResponse{}
 
-			logging.FrameworkDebug(
+			logging.FrameworkTrace(
 				ctx,
 				"Calling provider defined ConfigValidator",
 				map[string]interface{}{
@@ -67,7 +70,7 @@ func (s *Server) ValidateDataSourceConfig(ctx context.Context, req *ValidateData
 				},
 			)
 			configValidator.ValidateDataSource(ctx, vdscReq, vdscResp)
-			logging.FrameworkDebug(
+			logging.FrameworkTrace(
 				ctx,
 				"Called provider defined ConfigValidator",
 				map[string]interface{}{
@@ -86,9 +89,9 @@ func (s *Server) ValidateDataSourceConfig(ctx context.Context, req *ValidateData
 		// from modifying or removing diagnostics.
 		vdscResp := &datasource.ValidateConfigResponse{}
 
-		logging.FrameworkDebug(ctx, "Calling provider defined DataSource ValidateConfig")
+		logging.FrameworkTrace(ctx, "Calling provider defined DataSource ValidateConfig")
 		dataSource.ValidateConfig(ctx, vdscReq, vdscResp)
-		logging.FrameworkDebug(ctx, "Called provider defined DataSource ValidateConfig")
+		logging.FrameworkTrace(ctx, "Called provider defined DataSource ValidateConfig")
 
 		resp.Diagnostics.Append(vdscResp.Diagnostics...)
 	}

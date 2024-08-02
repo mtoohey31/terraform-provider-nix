@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package planmodifier
 
 import (
@@ -79,7 +82,7 @@ type BoolResponse struct {
 	Private *privatestate.ProviderData
 
 	// Diagnostics report errors or warnings related to modifying the resource
-	// configuration. An empty slice indicates success, with no warnings or
+	// plan. An empty slice indicates success, with no warnings or
 	// errors generated.
 	Diagnostics diag.Diagnostics
 }
